@@ -54,7 +54,7 @@ Moves one square forward and captures one square diagonally forward.
 No installation is needed! You can play the game by simply opening the index.html file in any modern web browser.
 If you want to modify the code:
 Clone the repository:
-git clone https://github.com/wellknown21st/main.git
+git clone https://github.com/wellknown21st/Game
 
 
 Navigate to the directory:
