@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Historical Chaturaji</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chosen Palette: Warm Neutrals with Subtle Accents -->
+    <!-- Application Structure Plan: A central dashboard layout featuring the game board, surrounded by essential player information (scores, status) and controls. The user flow is roll -> move 1 -> move 2 -> next player. This structure places all necessary context in immediate view, making the complex ruleset understandable and reducing cognitive load for the player. A modal is used for game-end notifications to provide a clear, non-disruptive conclusion. -->
+    <!-- Visualization & Content Choices: The game is represented using a structured HTML/CSS grid for the board and pieces, which is optimal for a board game. Dynamic text updates for scores and status provide real-time feedback. User interaction is handled via vanilla JS click events, which directly map to the game's core actions (rolling, selecting, moving). This approach avoids unnecessary libraries and keeps the application lightweight and fast, focusing on implementing the complex game logic derived from the report. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .square {
+            transition: background-color 0.3s ease;
+        }
+        .piece {
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            width: 75%;
+            height: 75%;
+            font-size: clamp(16px, 3.5vmin, 24px);
+        }
+        .piece.selected {
+            transform: scale(1.15);
+            box-shadow: 0 0 15px 5px rgba(255, 215, 0, 0.8);
+            z-index: 10;
+        }
+        .highlight {
+            background-color: rgba(135, 206, 235, 0.6) !important;
+            box-shadow: inset 0 0 10px #5a9ac2;
+        }
+        .capture::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 80%;
+            border-radius: 50%;
+            border: 3px solid rgba(255, 69, 0, 0.7);
+            box-sizing: border-box;
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.7; }
+            70% { transform: translate(-50%, -50%) scale(1.1); opacity: 0.3; }
+            100% { transform: translate(-50%, -50%) scale(0.9); opacity: 0.7; }
+        }
+        .piece.red { background-color: #ef4444; color: white; }
+        .piece.green { background-color: #22c55e; color: white; }
+        .piece.yellow { background-color: #facc15; color: #422006; }
+        .piece.black { background-color: #1f2937; color: white; }
+
+        .player-card.red { border-color: #ef4444; }
+        .player-card.green { border-color: #22c55e; }
+        .player-card.yellow { border-color: #facc15; }
+        .player-card.black { border-color: #1f2937; }
+        
+        .player-card.active {
+             box-shadow: 0 0 15px 3px currentColor;
+             transform: translateY(-4px);
+        }
+
+        .awaiting-promotion {
+            outline: 3px dashed #a855f7;
+            outline-offset: -3px;
+        }
+        .eliminated .piece {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body class="bg-stone-100 text-stone-800 flex flex-col items-center justify-center min-h-screen p-2 sm:p-4">
+
+    <div class="w-full max-w-7xl mx-auto">
+        <header class="text-center mb-4">
+            <h1 class="text-3xl sm:text-4xl font-bold text-stone-700">Chaturaji</h1>
+            <p class="text-stone-500">The Ancient Four-Player Game of India</p>
+        </header>
+
+        <main class="flex flex-col lg:flex-row gap-4 lg:gap-8 items-center lg:items-start justify-center">
+
+            <!-- Player Info Left (Red & Black) -->
+            <div class="w-full lg:w-1/4 flex flex-row lg:flex-col gap-4">
+                <div id="player-card-red" class="player-card red w-1/2 lg:w-full bg-white p-3 rounded-lg border-l-8 transition-all duration-300">
+                    <h3 class="font-bold text-lg">Red Army</h3>
+                    <p class="text-sm">Score: <span id="score-red">0</span></p>
+                </div>
+                 <div id="player-card-black" class="player-card black w-1/2 lg:w-full bg-white p-3 rounded-lg border-l-8 transition-all duration-300">
+                    <h3 class="font-bold text-lg">Black Army</h3>
+                    <p class="text-sm">Score: <span id="score-black">0</span></p>
+                </div>
+            </div>
+
+            <!-- Game Board and Controls -->
+            <div class="w-full max-w-[480px] md:max-w-[520px] lg:max-w-[600px] flex-shrink-0">
+                <div id="board" class="grid grid-cols-8 grid-rows-8 aspect-square border-4 border-stone-600 rounded-md shadow-lg"></div>
+                <div id="controls" class="mt-4 text-center">
+                    <div id="status" class="text-lg font-semibold h-12 flex items-center justify-center p-2 bg-white rounded-lg shadow-inner mb-4">Red's turn. Roll the dice.</div>
+                    <div class="flex items-center justify-center gap-4">
+                        <button id="roll-dice" class="px-6 py-3 bg-sky-600 text-white font-bold rounded-lg shadow-md hover:bg-sky-700 transition-all duration-200 transform hover:scale-105 disabled:bg-stone-400 disabled:cursor-not-allowed disabled:transform-none">Roll Dice</button>
+                        <div id="dice-result" class="text-xl font-bold p-3 bg-white rounded-lg shadow-inner">Dice: --</div>
+                         <button id="reset" class="px-6 py-3 bg-rose-600 text-white font-bold rounded-lg shadow-md hover:bg-rose-700 transition-all duration-200 transform hover:scale-105">Reset</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Player Info Right (Green & Yellow) -->
+            <div class="w-full lg:w-1/4 flex flex-row lg:flex-col gap-4">
+                 <div id="player-card-green" class="player-card green w-1/2 lg:w-full bg-white p-3 rounded-lg border-r-8 lg:border-r-0 lg:border-l-8 transition-all duration-300">
+                    <h3 class="font-bold text-lg">Green Army</h3>
+                    <p class="text-sm">Score: <span id="score-green">0</span></p>
+                </div>
+                <div id="player-card-yellow" class="player-card yellow w-1/2 lg:w-full bg-white p-3 rounded-lg border-r-8 lg:border-r-0 lg:border-l-8 transition-all duration-300">
+                    <h3 class="font-bold text-lg">Yellow Army</h3>
+                    <p class="text-sm">Score: <span id="score-yellow">0</span></p>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Modal for game over -->
+    <div id="modal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-white rounded-lg shadow-2xl p-8 text-center max-w-md w-full">
+            <h2 id="modal-title" class="text-3xl font-bold mb-4">Game Over!</h2>
+            <p id="modal-body" class="text-stone-600 mb-6">The scores are tallied.</p>
+            <button id="modal-close" class="px-8 py-3 bg-sky-600 text-white font-bold rounded-lg shadow-md hover:bg-sky-700 transition-transform transform hover:scale-105">Play Again</button>
+        </div>
+    </div>
+
+
+    <script>
+        const board = document.getElementById("board");
+        const statusDisplay = document.getElementById("status");
+        const diceButton = document.getElementById("roll-dice");
+        const diceResult = document.getElementById("dice-result");
+        const resetButton = document.getElementById("reset");
+        const modal = document.getElementById("modal");
+        const modalTitle = document.getElementById("modal-title");
+        const modalBody = document.getElementById("modal-body");
+        const modalClose = document.getElementById("modal-close");
+
+        const BOARD_SIZE = 8;
+        const players = ["red", "green", "yellow", "black"];
+        const piecePointValues = { P: 1, T: 2, N: 3, E: 4, K: 5 };
+        
+        let scores, currentPlayerIndex, diceRolls, movesMadeThisTurn, selectedPiece, capturedPieces, eliminatedPlayers, initialPiecePositions;
+
+        function getPieceName(type) {
+            const names = { K: 'King', E: 'Elephant', N: 'Horse', T: 'Boat', P: 'Pawn' };
+            return names[type] || 'Unknown';
+        }
+
+        function getMoveDescription(type) {
+            const descriptions = {
+                K: 'Moves one square in any direction.',
+                E: 'Moves any number of squares orthogonally (like a Rook).',
+                N: 'Jumps in an L-shape (like a Knight).',
+                T: 'Jumps exactly two squares diagonally.',
+                P: 'Moves one square forward, captures one square diagonally forward.'
+            };
+            return descriptions[type] || '';
+        }
+
+        function createBoard() {
+            board.innerHTML = '';
+            for (let row = 0; row < BOARD_SIZE; row++) {
+                for (let col = 0; col < BOARD_SIZE; col++) {
+                    const square = document.createElement("div");
+                    square.classList.add("square", "relative", "flex", "justify-center", "items-center");
+                    square.classList.add((row + col) % 2 === 0 ? "bg-stone-300" : "bg-stone-500");
+                    square.dataset.row = row;
+                    square.dataset.col = col;
+                    square.addEventListener("click", handleSquareClick);
+                    board.appendChild(square);
+                }
+            }
+        }
+
+        function placePieces() {
+            const pieceSetup = {
+                red:    [{ row: 0, col: 4, type: "K" }, { row: 0, col: 3, type: "E" }, { row: 0, col: 2, type: "N" }, { row: 0, col: 1, type: "T" }, { row: 1, col: 0, type: "P" }, { row: 1, col: 1, type: "P" }, { row: 1, col: 2, type: "P" }, { row: 1, col: 3, type: "P" }, { row: 1, col: 4, type: "P" } ],
+                green:  [{ row: 4, col: 7, type: "K" }, { row: 3, col: 7, type: "E" }, { row: 2, col: 7, type: "N" }, { row: 1, col: 7, type: "T" }, { row: 0, col: 6, type: "P" }, { row: 1, col: 6, type: "P" }, { row: 2, col: 6, type: "P" }, { row: 3, col: 6, type: "P" }, { row: 4, col: 6, type: "P" } ],
+                yellow: [{ row: 7, col: 3, type: "K" }, { row: 7, col: 4, type: "E" }, { row: 7, col: 5, type: "N" }, { row: 7, col: 6, type: "T" }, { row: 6, col: 3, type: "P" }, { row: 6, col: 4, type: "P" }, { row: 6, col: 5, type: "P" }, { row: 6, col: 6, type: "P" }, { row: 6, col: 7, type: "P" } ],
+                black:  [{ row: 3, col: 0, type: "K" }, { row: 4, col: 0, type: "E" }, { row: 5, col: 0, type: "N" }, { row: 6, col: 0, type: "T" }, { row: 3, col: 1, type: "P" }, { row: 4, col: 1, type: "P" }, { row: 5, col: 1, type: "P" }, { row: 6, col: 1, type: "P" }, { row: 7, col: 1, type: "P" } ]
+            };
+
+            Object.keys(pieceSetup).forEach(color => {
+                initialPiecePositions[color] = {};
+                pieceSetup[color].forEach(({ row, col, type }) => {
+                    if (type !== 'P') {
+                        if (color === 'red' || color === 'yellow') {
+                            initialPiecePositions[color][col] = type;
+                        } else {
+                            initialPiecePositions[color][row] = type;
+                        }
+                    }
+                    setPiece(row, col, type, color);
+                });
+            });
+        }
+        
+        function setPiece(row, col, type, color) {
+            const square = document.querySelector(`.square[data-row="${row}"][data-col="${col}"]`);
+            if (!square) return;
+            const piece = document.createElement("div");
+            piece.classList.add("piece", color, "rounded-full", "flex", "justify-center", "items-center", "font-bold", "cursor-pointer", "shadow-md");
+            piece.textContent = type;
+            piece.title = `${getPieceName(type)}: ${getMoveDescription(type)}`;
+            piece.addEventListener("click", handlePieceClick);
+            square.appendChild(piece);
+        }
+
+        function rollDice() {
+            if (movesMadeThisTurn > 0 && diceRolls.length > 0) {
+                return;
+            }
+            diceRolls = [Math.floor(Math.random() * 4) + 2, Math.floor(Math.random() * 4) + 2];
+            movesMadeThisTurn = 0;
+            diceResult.textContent = `Dice: ${diceRolls[0]}, ${diceRolls[1]}`;
+            diceButton.disabled = true;
+            updateStatusForTurn();
+
+            if (!canPlayerMove(players[currentPlayerIndex], diceRolls)) {
+                statusDisplay.textContent = `${players[currentPlayerIndex].toUpperCase()} has no moves! Skipping.`;
+                setTimeout(endTurn, 2000);
+            }
+        }
+
+        function getRollForPieceType(pieceType) {
+            if (pieceType === 'K' || pieceType === 'P') return 5;
+            if (pieceType === 'E') return 4;
+            if (pieceType === 'N') return 3;
+            if (pieceType === 'T') return 2;
+            return 0;
+        }
+
+        function getPieceTypeForRoll(roll) {
+            if (roll === 5) return "King/Pawn";
+            if (roll === 4) return "Elephant";
+            if (roll === 3) return "Horse";
+            if (roll === 2) return "Boat";
+            return "Unknown";
+        }
+        
+        function isPieceValidForDiceRolls(pieceType, rolls) {
+            const requiredRoll = getRollForPieceType(pieceType);
+            return rolls.includes(requiredRoll);
+        }
+
+        function canPlayerMove(player, rolls) {
+            const pieces = document.querySelectorAll(`.piece.${player}`);
+            for (const piece of pieces) {
+                if(isPieceValidForDiceRolls(piece.textContent, rolls)) {
+                    if (getValidMoves(piece).length > 0) return true;
+                }
+            }
+            return false;
+        }
+
+        function handlePieceClick(event) {
+            event.stopPropagation();
+            const piece = event.target;
+            const pieceColor = piece.classList[1];
+            const currentPlayer = players[currentPlayerIndex];
+
+            if (pieceColor !== currentPlayer || eliminatedPlayers.includes(pieceColor)) {
+                return;
+            }
+            if (diceRolls.length === 0) {
+                return;
+            }
+
+            if (!isPieceValidForDiceRolls(piece.textContent, diceRolls)) {
+                return;
+            }
+
+            if (selectedPiece) {
+                selectedPiece.classList.remove("selected");
+                clearHighlights();
+            }
+
+            if (selectedPiece === piece) {
+                selectedPiece = null;
+            } else {
+                selectedPiece = piece;
+                selectedPiece.classList.add("selected");
+                highlightValidMoves(piece);
+            }
+        }
+        
+        function handleSquareClick(event) {
+            if (!selectedPiece) return;
+            const targetSquare = event.currentTarget;
+            if (!targetSquare.classList.contains("highlight")) return;
+
+            const targetPiece = targetSquare.querySelector('.piece');
+            if(targetPiece) {
+                handleCapture(players[currentPlayerIndex], targetPiece);
+            }
+
+            movePiece(selectedPiece, targetSquare);
+            
+            const usedRoll = getRollForPieceType(selectedPiece.textContent);
+            const rollIndex = diceRolls.indexOf(usedRoll);
+            if(rollIndex > -1) {
+                diceRolls.splice(rollIndex, 1);
+            }
+            
+            selectedPiece.classList.remove("selected");
+            selectedPiece = null;
+            clearHighlights();
+            movesMadeThisTurn++;
+
+            if (movesMadeThisTurn >= 2 || diceRolls.length === 0) {
+                endTurn();
+            } else {
+                 updateStatusForTurn();
+                 if (!canPlayerMove(players[currentPlayerIndex], diceRolls)) {
+                    statusDisplay.textContent = `No moves for remaining roll. Skipping.`;
+                    setTimeout(endTurn, 2000);
+                 }
+            }
+        }
+
+        function getValidMoves(piece) {
+            const row = parseInt(piece.parentElement.dataset.row);
+            const col = parseInt(piece.parentElement.dataset.col);
+            const pieceColor = piece.classList[1];
+            let moves = [];
+
+            switch (piece.textContent) {
+                case "K":
+                    for(let dr = -1; dr <= 1; dr++) {
+                        for(let dc = -1; dc <= 1; dc++) {
+                            if(dr === 0 && dc === 0) continue;
+                            moves.push([row + dr, col + dc]);
+                        }
+                    }
+                    break;
+                case "N":
+                    moves = [ [row-2,col-1], [row-2,col+1], [row+2,col-1], [row+2,col+1], [row-1,col-2], [row-1,col+2], [row+1,col-2], [row+1,col+2] ];
+                    break;
+                case "E":
+                    const directions = [[0,1], [0,-1], [1,0], [-1,0]];
+                    for(const [dr, dc] of directions) {
+                        for(let i = 1; i < BOARD_SIZE; i++) {
+                            const r = row + i * dr;
+                            const c = col + i * dc;
+                            if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) break;
+                            const square = document.querySelector(`.square[data-row="${r}"][data-col="${c}"]`);
+                            const pieceOnSquare = square.querySelector('.piece');
+                            if(pieceOnSquare) {
+                                if(!pieceOnSquare.classList.contains(pieceColor)) moves.push([r, c]);
+                                break;
+                            }
+                            moves.push([r, c]);
+                        }
+                    }
+                    break;
+                case "T":
+                    moves = [ [row-2,col-2], [row-2,col+2], [row+2,col-2], [row+2,col+2] ];
+                    break;
+                case "P":
+                    let forwardMoves = [], captureMoves = [];
+                    if (pieceColor === 'red') { forwardMoves.push([row+1, col]); captureMoves.push([row+1, col-1], [row+1, col+1]); }
+                    else if (pieceColor === 'green') { forwardMoves.push([row, col-1]); captureMoves.push([row-1, col-1], [row+1, col-1]); }
+                    else if (pieceColor === 'yellow') { forwardMoves.push([row-1, col]); captureMoves.push([row-1, col-1], [row-1, col+1]); }
+                    else if (pieceColor === 'black') { forwardMoves.push([row, col+1]); captureMoves.push([row-1, col+1], [row+1, col+1]); }
+                    
+                    forwardMoves.forEach(([r, c]) => {
+                         const fSquare = document.querySelector(`.square[data-row="${r}"][data-col="${c}"]`);
+                         if(fSquare && !fSquare.querySelector('.piece')) moves.push([r, c]);
+                    });
+                    captureMoves.forEach(([r, c]) => {
+                        const cSquare = document.querySelector(`.square[data-row="${r}"][data-col="${c}"]`);
+                        if(cSquare && cSquare.querySelector('.piece') && !cSquare.querySelector('.piece').classList.contains(pieceColor)) moves.push([r, c]);
+                    });
+                    break;
+            }
+            
+            return moves.filter(([r, c]) => r >= 0 && r < BOARD_SIZE && c >= 0 && c < BOARD_SIZE)
+                        .filter(([r, c]) => {
+                            const square = document.querySelector(`.square[data-row="${r}"][data-col="${c}"]`);
+                            const pieceOnSquare = square.querySelector('.piece');
+                            return !pieceOnSquare || !pieceOnSquare.classList.contains(pieceColor);
+                        });
+        }
+        
+        function highlightValidMoves(piece) {
+            const validMoves = getValidMoves(piece);
+            validMoves.forEach(([r, c]) => {
+                const square = document.querySelector(`.square[data-row="${r}"][data-col="${c}"]`);
+                if(square) {
+                    square.classList.add("highlight");
+                    if(square.querySelector('.piece')) {
+                        square.classList.add("capture");
+                    }
+                }
+            });
+        }
+
+        function clearHighlights() {
+            document.querySelectorAll(".highlight, .capture").forEach(sq => {
+                sq.classList.remove("highlight", "capture");
+            });
+        }
+
+        function movePiece(piece, targetSquare) {
+            targetSquare.appendChild(piece);
+            if (piece.textContent === 'P' && isPawnOnFinalRank(piece, targetSquare)) {
+                attemptPromotion(piece, targetSquare);
+            }
+             if (piece.textContent === 'T') {
+                checkForBoatTriumph(targetSquare);
+            }
+            checkAwaitingPawns();
+        }
+
+        function handleCapture(capturingPlayer, capturedPiece) {
+            const capturedPlayer = capturedPiece.classList[1];
+            const capturedType = capturedPiece.textContent;
+
+            scores[capturingPlayer] += piecePointValues[capturedType] || 0;
+            capturedPieces[capturedPlayer][capturedType]++;
+            
+            capturedPiece.parentElement.removeChild(capturedPiece);
+            updateScoreboard();
+
+            if (capturedType === 'K') {
+                if (!eliminatedPlayers.includes(capturedPlayer)) {
+                    eliminatedPlayers.push(capturedPlayer);
+                    document.getElementById(`player-card-${capturedPlayer}`).classList.add('eliminated');
+                }
+                if (eliminatedPlayers.length >= 3) {
+                    endGame();
+                }
+            }
+        }
+        
+        function isPawnOnFinalRank(pawn, square) {
+            const color = pawn.classList[1];
+            const row = parseInt(square.dataset.row);
+            const col = parseInt(square.dataset.col);
+            if ((color === 'red' && row === 7) || (color === 'yellow' && row === 0) ||
+                (color === 'green' && col === 0) || (color === 'black' && col === 7)) {
+                return true;
+            }
+            return false;
+        }
+
+        function attemptPromotion(pawn, square) {
+            const color = pawn.classList[1];
+            const row = parseInt(square.dataset.row);
+            const col = parseInt(square.dataset.col);
+
+            let promotionFileOwner, promotionFileIndex;
+            if(color === 'red') { promotionFileOwner = 'yellow'; promotionFileIndex = col; }
+            else if (color === 'yellow') { promotionFileOwner = 'red'; promotionFileIndex = col; }
+            else if (color === 'green') { promotionFileOwner = 'black'; promotionFileIndex = row; }
+            else if (color === 'black') { promotionFileOwner = 'green'; promotionFileIndex = row; }
+
+            const promotionType = initialPiecePositions[promotionFileOwner]?.[promotionFileIndex];
+            if (!promotionType) return;
+            
+            if (capturedPieces[color][promotionType] > 0) {
+                pawn.textContent = promotionType;
+                pawn.classList.remove('awaiting-promotion');
+                pawn.title = `${getPieceName(promotionType)}: ${getMoveDescription(promotionType)}`;
+            } else {
+                pawn.classList.add('awaiting-promotion');
+            }
+        }
+
+        function checkAwaitingPawns() {
+            document.querySelectorAll('.piece.awaiting-promotion').forEach(pawn => {
+                const color = pawn.classList[1];
+                if (pawn.classList.contains(color)) { // Check if it's the player's own piece
+                     attemptPromotion(pawn, pawn.parentElement);
+                }
+            });
+        }
+        
+        function checkForBoatTriumph(boatSquare) {
+            const r = parseInt(boatSquare.dataset.row);
+            const c = parseInt(boatSquare.dataset.col);
+            const movingBoat = boatSquare.querySelector('.piece');
+            const movingPlayer = movingBoat.classList[1];
+
+            const triumphChecks = [
+                [[0,1], [1,0], [1,1]], // I am top-left
+                [[0,-1], [1,0], [1,-1]], // I am top-right
+                [[-1,0], [-1,1], [0,1]], // I am bottom-left
+                [[-1,-1], [-1,0], [0,-1]]  // I am bottom-right
+            ];
+            for (const check of triumphChecks) {
+                const otherSquares = check.map(([dr, dc]) => document.querySelector(`.square[data-row="${r + dr}"][data-col="${c + dc}"]`));
+                if(otherSquares.every(sq => sq && sq.querySelector('.piece')?.textContent === 'T')) {
+                     otherSquares.forEach(sq => {
+                         handleCapture(movingPlayer, sq.querySelector('.piece'));
+                     });
+                    return;
+                }
+            }
+        }
+
+        function endTurn() {
+            if (selectedPiece) {
+                selectedPiece.classList.remove("selected");
+                selectedPiece = null;
+            }
+            clearHighlights();
+            
+            do {
+                currentPlayerIndex = (currentPlayerIndex + 1) % players.length;
+            } while (eliminatedPlayers.includes(players[currentPlayerIndex]));
+
+            diceRolls = [];
+            movesMadeThisTurn = 0;
+            diceResult.textContent = "Dice: --";
+            diceButton.disabled = false;
+            updateStatusForTurn();
+        }
+
+        function updateScoreboard() {
+            players.forEach(p => {
+                document.getElementById(`score-${p}`).textContent = scores[p];
+            });
+        }
+
+        function updateStatusForTurn() {
+            const currentPlayer = players[currentPlayerIndex];
+            
+            document.querySelectorAll('.player-card').forEach(card => card.classList.remove('active'));
+            document.getElementById(`player-card-${currentPlayer}`).classList.add('active');
+
+            if (diceRolls.length === 0) {
+                statusDisplay.textContent = `${currentPlayer.toUpperCase()}'s turn. Roll the dice.`;
+            } else if (movesMadeThisTurn === 0) {
+                const types = diceRolls.map(getPieceTypeForRoll).join(' or ');
+                statusDisplay.textContent = `Rolls: ${diceRolls.join(', ')}. Move a ${types}.`;
+            } else if(diceRolls.length > 0) {
+                statusDisplay.textContent = `Roll: ${diceRolls[0]}. Move a ${getPieceTypeForRoll(diceRolls[0])}.`;
+            }
+        }
+        
+        function endGame() {
+            diceButton.disabled = true;
+            let winner = '';
+            let maxScore = -1;
+            
+            const finalScores = players.filter(p => !eliminatedPlayers.includes(p));
+            if(finalScores.length === 1) {
+                const survivor = finalScores[0];
+                if(scores[survivor] > 0) { // Bonus for capturing all kings. Historically 54.
+                     scores[survivor] += Object.values(piecePointValues).reduce((sum, val) => sum + (val * 4), 0) * 3 - scores[survivor]; // simplified bonus logic for demo
+                }
+            }
+
+            for(const player of players) {
+                if(scores[player] > maxScore) {
+                    maxScore = scores[player];
+                    winner = player;
+                }
+            }
+            
+            modalTitle.textContent = `${winner.toUpperCase()} Wins!`;
+            let scoreText = players.map(p => `${p.toUpperCase()}: ${scores[p]} points`).join('<br>');
+            modalBody.innerHTML = `Final Scores:<br>${scoreText}`;
+            modal.classList.remove('hidden');
+        }
+
+        function resetGame() {
+            scores = { red: 0, green: 0, yellow: 0, black: 0 };
+            capturedPieces = {
+                red: { K: 0, E: 0, N: 0, T: 0, P: 0 },
+                green: { K: 0, E: 0, N: 0, T: 0, P: 0 },
+                yellow: { K: 0, E: 0, N: 0, T: 0, P: 0 },
+                black: { K: 0, E: 0, N: 0, T: 0, P: 0 }
+            };
+            initialPiecePositions = {};
+            currentPlayerIndex = 0;
+            diceRolls = [];
+            movesMadeThisTurn = 0;
+            selectedPiece = null;
+            eliminatedPlayers = [];
+
+            modal.classList.add('hidden');
+            diceButton.disabled = false;
+            document.querySelectorAll('.player-card').forEach(card => card.classList.remove('eliminated'));
+
+            createBoard();
+            placePieces();
+            updateScoreboard();
+            updateStatusForTurn();
+        }
+
+        resetButton.addEventListener("click", resetGame);
+        diceButton.addEventListener("click", rollDice);
+        modalClose.addEventListener("click", resetGame);
+
+        resetGame();
+    </script>
+</body>
+</html>
